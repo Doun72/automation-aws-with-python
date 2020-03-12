@@ -10,3 +10,4 @@ Add commands:
   - list_buckets
   - list_buckets_object
   - create and configure S3 bucket
+  - sync directory tree to bucket 
