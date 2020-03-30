@@ -8,8 +8,6 @@ ipython = "*"
 
 [packages]
 boto3 = "*"
-click = "*"
-pycrypto = "*"
 
 [requires]
 python_version = "3.7"

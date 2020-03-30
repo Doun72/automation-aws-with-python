@@ -1,88 +1,65 @@
+#!usr/bin/python
+# -*- coding: utf-8 -*-
+
+"""This script is."""
+
 import boto3
 import click
-from botocore.exceptions import ClientError
-from pathlib import Path
-import mimetypes
 
-session = boto3.Session(profile_name='nagradev-sts')
-s3 = session.resource('s3')
+from bucket import BucketManager
+from certificate import CertificateManager
+
+session = None
+bucket_manager = None
+cert_manager = None
 
 @click.group()
-def cli():
-    "Webotron deploys web site to AWS"
-    pass
+@click.option('--profile', help='Give the profile to use',default=None)
+def cli(profile):
+    """Webotron deploys web site to AWS."""
+    global session, bucket_manager, cert_manager
+    session_cfg = {}
+    if profile:
+        session_cfg['profile_name'] = profile
+    session = boto3.Session(**session_cfg)
+    bucket_manager = BucketManager(session)
+    cert_manager = CertificateManager(session)
 
 @cli.command('list_buckets')
 def list_buckets ():
-    "List the buckets"
-    for bucket in s3.buckets.all():
+    """List the buckets."""
+    for bucket in bucket_manager.all_buckets():
         print (bucket.name)
 
 @cli.command('list_buckets_object')
 @click.argument('bucket')
 def list_buckets_object(bucket):
-    "List objects in a S3 bucket"
-    for obj in s3.Bucket(bucket).objects.all():
+    """List objects in a S3 bucket."""
+    for obj in bucket_manager.all_objects(bucket):
         print(obj)
 
 @cli.command('create_and_configure_bucket')
 @click.argument('bucket')
 def create_and_configure_bucket(bucket):
-    "Create and configure S3 bucket"
-    s3_bucket = None
-    try:
-        s3_bucket = s3.create_bucket(Bucket=bucket,
-            CreateBucketConfiguration={'LocationConstraint': session.region_name})
-    except ClientError as e:
-        if e.response['Error']['Code'] == 'BucketAlreadyOwnedByYou':
-            s3_bucket = s3.Bucket(bucket)
-        else:
-            raise e
-
-    policy = """
-    {
-    "Version":"2012-10-17",
-    "Statement":[
-        {
-            "Sid":"PublicRead",
-            "Effect":"Allow",
-            "Principal": "*",
-            "Action":["s3:GetObject"],
-            "Resource":["arn:aws:s3:::%s/*"]
-        }
-    ]
-    }
-    """ % bucket.name
-    #remove any space
-    policy = policy.strip()
-    pol = s3_bucket.Policy()
-    pol.put(Policy=policy)
-    ws = s3_bucket.Website()
-    ws.put(WebSiteConfiguration={
-        "ErrorDocument" : {'key','error.html'},
-        "IndexDocument" : {'suffix','index.html'},
-
-    })
+    """Create and configure S3 bucket."""
+    s3_bucket = bucket_manager.init_bucket(bucket)
+    bucket_manager.set_bucket_policy(s3_bucket)
+    bucket_manager.configure_Website(s3_bucket)
     return
 
-def upload_file(bucket,path,key):
-    content_type = mimetypes.guess_type(key)[0] or 'text/html'
-    bucket.upload_file(path,key,ExtraArgs={'Content',content_type})
 
 @cli.command('sync')
 @click.argument('pathname', type=click.Path(exists=True))
 @click.argument('bucket')
 def sync(pathname,bucket):
-    "Sync content of a pathname to bucket"
-    s3_bucket = s3.Bucket(bucket)
-    root = Path(pathname).expanduser().resolve()
+    """Sync content of a pathname to bucket."""
+    bucket_manager.sync(pathname,bucket)
 
-    def handle_directory(target):
-        for p in target.iterdir():
-            if p.is_dir():handle_directory(p)
-            if p.is_file():upload_file(s3_bucket, str(p), str(p.relative_to(root)))
-
-    handle_directory(root)
+@cli.command('find_cert')
+@click.argument('domain_name')
+def find_cert(domain_name):
+    """Find the certificate for the domain name."""
+    print(cert_manager.find_matching_cert(domain_name))
 
 if __name__ == '__main__':
     cli()
